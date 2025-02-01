@@ -1,13 +1,6 @@
-import speech_recognition as sr
-import webbrowser
-import pyttsx3
+import os
 
-recognizer=sr.Recognizer()
-engine=pyttsx3.init()
-
-def speak(text):
-    engine.say(text)
-    engine.runAndWait()
-
-if __name__=="__main__":
-    speak("Initializing Jarvis...")    
+import eel
+eel.init('web')
+os.system('start brave.exe --app="http://localhost:8000/index.html"')
+eel.start('index.html',size=(800,800), mode = None,host='localhost',block=True)
