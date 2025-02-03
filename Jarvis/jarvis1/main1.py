@@ -4,13 +4,13 @@
 # eel.init('web')
 # os.system('start brave.exe --app="http://localhost:8000/index.html"')
 # eel.start('index.html',size=(1270,960), mode = None,host='localhost',block=True)
-
 import speech_recognition as sr
 import pyttsx3
 import webbrowser
 import subprocess
 import os
 from googlesearch import search
+import nltk  # You can use nltk later for advanced NLP tasks if needed
 
 # -------------------------------
 # Function to convert text to speech
