@@ -1,123 +1,177 @@
-# import os
-
-# import eel
-# eel.init('web')
-# os.system('start brave.exe --app="http://localhost:8000/index.html"')
-# eel.start('index.html',size=(1270,960), mode = None,host='localhost',block=True)
 import speech_recognition as sr
 import pyttsx3
 import webbrowser
 import subprocess
+import nltk
 import os
-from googlesearch import search
-import nltk  # You can use nltk later for advanced NLP tasks if needed
+from nltk import pos_tag, word_tokenize
+from nltk.chunk import ne_chunk
+from nltk.tree import Tree
 
-# -------------------------------
-# Function to convert text to speech
-# -------------------------------
-def speak(text):
-    engine = pyttsx3.init()  # Initialize the text-to-speech engine
-    engine.say(text)         # Queue the text to be spoken
-    engine.runAndWait()      # Process and play the speech
+# Ensure NLTK data is properly located
+nltk.data.path.append(os.path.join(os.path.expanduser("~"), "nltk_data"))
 
-# -------------------------------
-# Function to capture audio and convert it to text
-# -------------------------------
-def listen_command():
-    r = sr.Recognizer()      # Create a Recognizer instance
-    with sr.Microphone() as source:
-        print("Listening...")
-        audio = r.listen(source)  # Listen to the microphone for audio input
+class TerminalAssistant:
+    def __init__(self):
+        self.engine = pyttsx3.init()
+        self.recognizer = sr.Recognizer()
+        self.setup_nltk()
+        self.setup_engine()
+        
+    def setup_nltk(self):
+        """Verify and download required NLTK resources"""
+        required_resources = [
+            'punkt',
+            'averaged_perceptron_tagger',
+            'maxent_ne_chunker',
+            'words'
+        ]
+        
+        for resource in required_resources:
+            try:
+                nltk.data.find(f"corpora/{resource}" if resource == "words" else f"tokenizers/{resource}")
+            except LookupError:
+                print(f"Downloading missing NLTK resource: {resource}")
+                nltk.download(resource, quiet=False)
+
+    def setup_engine(self):
+        """Configure text-to-speech engine"""
+        voices = self.engine.getProperty('voices')
+        self.engine.setProperty('voice', voices[1].id)  # Use female voice if available
+        self.engine.setProperty('rate', 150)
+
+    def speak(self, text):
+        """Convert text to speech with console output"""
+        print(f"Assistant: {text}")
+        self.engine.say(text)
+        self.engine.runAndWait()
+
+    def listen_command(self):
+        """Capture and process voice command"""
         try:
-            # Use Google's speech recognition service to convert audio to text
-            command = r.recognize_google(audio)
-            print("You said:", command)
+            with sr.Microphone() as source:
+                print("\nListening... (Ctrl+C to exit)")
+                self.recognizer.adjust_for_ambient_noise(source, duration=1)
+                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=8)
+                command = self.recognizer.recognize_google(audio).lower()
+                print(f"You said: {command}")
+                return command
         except sr.UnknownValueError:
-            speak("Sorry, I did not understand that.")
+            print("Could not understand audio")
             return ""
         except sr.RequestError:
-            speak("Sorry, the speech service is down.")
+            print("Speech service unavailable")
             return ""
-    return command.lower()   # Return the command in lowercase for easier processing
+        except Exception as e:
+            print(f"Error: {str(e)}")
+            return ""
 
-# -------------------------------
-# Function to search for a song on YouTube and open the search results
-# -------------------------------
-def open_youtube_song(song_name):
-    speak(f"Searching for {song_name} on YouTube")
-    query = song_name + " song"  # Append "song" to improve search relevance
-    # Build YouTube search URL using the query
-    url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
-    webbrowser.open(url)
+def analyze_command(command):
+    """Process natural language command using NLP"""
+    tokens = word_tokenize(command)
+    tagged = pos_tag(tokens)
+    ner_tree = ne_chunk(tagged)
 
-# -------------------------------
-# Function to open an application based on a pre-defined mapping (Windows example)
-# -------------------------------
-def open_application(app_name):
-    speak(f"Opening {app_name}")
-    if os.name == 'nt':  # Check if the operating system is Windows
-        apps = {
-            "notepad": "notepad.exe",
-            "calculator": "calc.exe",
-            # You can add more applications here as needed
-        }
-        if app_name in apps:
-            subprocess.Popen(apps[app_name])  # Launch the application
+    entities = []
+    verbs = []
+    
+    for chunk in ner_tree:
+        if isinstance(chunk, Tree):
+            entity = " ".join([word for word, pos in chunk.leaves()])
+            entities.append((entity, chunk.label()))
         else:
-            speak("Application not found in mapping.")
+            word, pos = chunk
+            if pos.startswith('VB'):
+                verbs.append(word.lower())
+
+    action_map = {
+        'open': ['open', 'launch', 'start'],
+        'search': ['search', 'find', 'look'],
+        'play': ['play', 'listen', 'queue'],
+        'exit': ['exit', 'quit', 'close']
+    }
+    
+    action = None
+    for verb in verbs:
+        for action_type, synonyms in action_map.items():
+            if verb in synonyms:
+                action = action_type
+                break
+        if action:
+            break
+
+    target = " ".join([word for word, pos in tagged if pos.startswith('NN')])
+    
+    return action, entities, target
+
+def process_command(command, assistant):
+    """Execute command based on NLP analysis"""
+    if not command:
+        return
+
+    action, entities, target = analyze_command(command)
+    print(f"Action: {action}\nEntities: {entities}\nTarget: {target}")
+
+    if action == 'open':
+        if 'youtube' in target:
+            handle_youtube(entities, assistant)
+        elif any(app in target for app in ['notepad', 'calculator']):
+            open_app(target, assistant)
+        else:
+            assistant.speak(f"Sorry, I can't open {target}")
+    elif action == 'search':
+        search_query = target or " ".join([e[0] for e in entities])
+        google_search(search_query, assistant)
+    elif action == 'play':
+        song_name = " ".join([e[0] for e in entities if e[1] in ['PERSON', 'WORK_OF_ART']])
+        play_youtube(song_name or target, assistant)
+    elif action == 'exit':
+        assistant.speak("Goodbye! Have a great day!")
+        exit()
     else:
-        # For macOS or Linux, you might need to modify this part with the appropriate commands.
-        speak("Application launching not configured for your OS.")
+        assistant.speak("I'm not sure how to help with that")
 
-# -------------------------------
-# Function to perform a Google search and open the first result
-# -------------------------------
-def search_google(query):
-    speak(f"Searching Google for {query}")
-    # The 'search' function returns URLs. We'll open the first one.
-    for url in search(query, num_results=1):
-        webbrowser.open(url)
-        break
-
-# -------------------------------
-# Process the user's command and call the appropriate function
-# -------------------------------
-def process_command(command):
-    if 'open youtube' in command:
-        # Check if the command also mentions a song
-        if 'song' in command:
-            # Extract song name from the command after the word 'song'
-            song_name = command.split('song')[-1].strip()
-            open_youtube_song(song_name)
-        else:
-            speak("Opening YouTube")
-            webbrowser.open("https://www.youtube.com")
-    elif 'open application' in command:
-        # Example command: "open application notepad"
-        words = command.split()
-        if len(words) >= 3:
-            # The application name is assumed to be the last word
-            app_name = words[-1]
-            open_application(app_name)
-        else:
-            speak("Please specify the application name.")
-    elif 'search' in command:
-        # Example command: "search artificial intelligence"
-        query = command.split('search')[-1].strip()
-        search_google(query)
-    elif 'exit' in command or 'quit' in command:
-        speak("Goodbye!")
-        exit()  # Terminate the program
+def handle_youtube(entities, assistant):
+    """Handle YouTube-related commands"""
+    songs = [e[0] for e in entities if e[1] == 'WORK_OF_ART']
+    if songs:
+        play_youtube(" ".join(songs), assistant)
     else:
-        # If the command doesn't match any known patterns
-        speak("I didn't catch that. Please try again.")
+        webbrowser.open("https://www.youtube.com")
+        assistant.speak("Opening YouTube")
 
-# -------------------------------
-# Main loop: Greet the user and continuously listen for commands
-# -------------------------------
+def play_youtube(query, assistant):
+    """Search and play YouTube content"""
+    assistant.speak(f"Playing {query} on YouTube")
+    search_url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
+    webbrowser.open(search_url)
+
+def open_app(app_name, assistant):
+    """Launch system applications"""
+    app_map = {
+        'notepad': 'notepad.exe',
+        'calculator': 'calc.exe'
+    }
+    if app_name in app_map:
+        subprocess.Popen(app_map[app_name])
+        assistant.speak(f"Opening {app_name}")
+    else:
+        assistant.speak("Application not available")
+
+def google_search(query, assistant):
+    """Perform web search"""
+    assistant.speak(f"Searching for {query}")
+    search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+    webbrowser.open(search_url)
+
 if __name__ == '__main__':
-    speak("Hello, how can I help you?")
-    while True:
-        command = listen_command()
-        if command:
-            process_command(command)
+    assistant = TerminalAssistant()
+    assistant.speak("Hello! I'm your voice assistant. How can I help you today?")
+    
+    try:
+        while True:
+            command = assistant.listen_command()
+            if command:
+                process_command(command, assistant)
+    except KeyboardInterrupt:
+        assistant.speak("Goodbye! Have a great day!")
