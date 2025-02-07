@@ -239,3 +239,4 @@ if __name__ == '__main__':
                 process_command(command, assistant)
     except KeyboardInterrupt:
         assistant.speak("Goodbye! Have a great day!")
+
