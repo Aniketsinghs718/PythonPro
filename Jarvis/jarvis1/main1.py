@@ -10,14 +10,22 @@ from nltk.chunk import ne_chunk
 from nltk.tree import Tree
 import requests
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 nltk.data.path.append(os.path.join(os.path.expanduser("~"), "nltk_data"))
 
+# API and URL constants
 GOOGLE_SEARCH_URL = "https://www.google.com/search?q={}"
 YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query={}"
-
 GEMINI_API_KEY = "AIzaSyApOFY-y1kuo5XBvHpcvZg6uJqVmXUyMsA"
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+# Email constants - Replace these with your actual credentials
+# NOTE: Storing credentials in code is not secure for production use
+EMAIL_ADDRESS = "aniketsinghs7188@gmail.com"  # Replace this after copying the code
+EMAIL_PASSWORD = "gkduheaufntfzkbd"    # Replace this after copying the code
 
 class TerminalAssistant:
     def __init__(self):
@@ -200,9 +208,109 @@ def write_content(topic, content_type, assistant):
         print(f"Error writing content: {str(e)}")
         assistant.speak(f"I'm sorry, I couldn't write the {content_type}.")
 
+def compose_email(topic, assistant):
+    try:
+        # Get recipient address
+        assistant.speak("Please enter the recipient's email address.")
+        recipient = input("Recipient email: ")
+        
+        # Generate subject and content with Gemini - with more specific instructions
+        subject_prompt = f"Create exactly one single-line email subject about {topic}. No bullet points or options. Just one line."
+        body_prompt = f"Write a professional email about: {topic}"
+        
+        assistant.speak(f"Composing email about {topic}. Please wait...")
+        
+        subject = ask_gemini(subject_prompt, summary=True)
+        # Clean up the subject line - extract just the first line and remove any special characters
+        subject = subject.split('\n')[0]  # Take only first line
+        subject = subject.replace('*', '').replace('#', '').strip()  # Remove markdown formatting
+        # If subject still has bullets or other formatting, extract just plain text
+        if ':' in subject:
+            subject = subject.split(':', 1)[1].strip()
+        
+        body = ask_gemini(body_prompt, summary=False)
+        
+        # Create a preview
+        preview = f"Subject: {subject}\n\n{body[:150]}...\n\nWould you like to send this email? (yes/no)"
+        print(preview)
+        assistant.speak("I've composed the email. Would you like to send it?")
+        
+        decision = input("Send email? (yes/no): ").lower()
+        
+        if decision == "yes":
+            return send_email(recipient, subject, body, assistant)
+        else:
+            assistant.speak("Email canceled.")
+            return False
+            
+    except Exception as e:
+        print(f"Error composing email: {str(e)}")
+        assistant.speak("I'm sorry, I couldn't compose the email.")
+        return False
+
+def send_email(recipient, subject, body, assistant):
+    try:
+        # Use the constants instead of asking for input each time
+        sender_email = EMAIL_ADDRESS  # Use the constant defined at the top
+        password = EMAIL_PASSWORD     # Use the constant defined at the top
+        
+        message = MIMEMultipart()
+        message["From"] = sender_email
+        message["To"] = recipient
+        message["Subject"] = subject
+        
+        message.attach(MIMEText(body, "plain"))
+        
+        # Connect to Gmail's SMTP server
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(sender_email, password)
+            server.sendmail(sender_email, recipient, message.as_string())
+        
+        assistant.speak(f"Email sent successfully to {recipient}")
+        return True
+    except Exception as e:
+        print(f"Error sending email: {str(e)}")
+        assistant.speak("I couldn't send the email. Please check your credentials or internet connection.")
+        return False
+
 def process_command(command, assistant):
     if not command:
         return
+
+    # Handle email commands
+    email_triggers = [
+        'send email', 'write email', 'send an email', 'write an email',
+        'compose email', 'email to', 'send mail', 'write mail'
+    ]
+    
+    for trigger in email_triggers:
+        if trigger in command.lower():
+            # Extract topic after the trigger
+            parts = command.lower().split(trigger)
+            if len(parts) > 1:
+                topic = parts[1].strip()
+                # Remove "to" or "about" if present
+                if topic.startswith("to "):
+                    topic = topic[3:].strip()  # Fixed typo
+                if topic.startswith("about "):
+                    topic = topic[6:].strip()
+                
+                if topic:
+                    compose_email(topic, assistant)
+                    return
+                else:
+                    assistant.speak("What would you like the email to be about?")
+                    topic = input("Email topic: ")
+                    if topic:
+                        compose_email(topic, assistant)
+                        return
+            else:
+                assistant.speak("What would you like the email to be about?")
+                topic = input("Email topic: ")
+                if topic:
+                    compose_email(topic, assistant)
+                    return
 
     # Handle writing commands
     writing_triggers = {
